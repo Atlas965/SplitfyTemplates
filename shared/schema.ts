@@ -41,6 +41,7 @@ export const users = pgTable("users", {
   stripeSubscriptionId: varchar("stripe_subscription_id"),
   subscriptionStatus: varchar("subscription_status").default("free"),
   subscriptionTier: varchar("subscription_tier").default("free"), // free, pro, label
+  role: varchar("role").default("user"), // user, admin
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

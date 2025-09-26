@@ -52,22 +52,31 @@ function rateLimit(maxRequests: number, windowMs: number) {
 }
 
 // Admin authorization middleware
-function isAdmin(req: any, res: any, next: any) {
+async function isAdmin(req: any, res: any, next: any) {
   const user = req.user;
   if (!user) {
     return res.status(401).json({ message: "Authentication required" });
   }
   
-  // Check if user has admin privileges (check subscription tier or email)
-  const isAdminUser = user.claims?.email?.includes('admin') || 
-                     user.claims?.subscriptionTier === 'admin' ||
-                     user.claims?.role === 'admin';
-                     
-  if (!isAdminUser) {
-    return res.status(403).json({ message: "Admin access required" });
+  try {
+    // Get user from database to verify admin role
+    const dbUser = await storage.getUser(user.claims.sub);
+    if (!dbUser) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    
+    // Check if user has admin privileges (only from database role field)
+    const isAdminUser = (dbUser as any).role === 'admin';
+                       
+    if (!isAdminUser) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    
+    next();
+  } catch (error) {
+    console.error("Error checking admin status:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
-  
-  next();
 }
 
 // Initialize Stripe only if secret key is available

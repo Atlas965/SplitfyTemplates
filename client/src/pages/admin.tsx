@@ -20,8 +20,8 @@ export default function AdminPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUser, setSelectedUser] = useState<any>(null);
 
-  // Check if user is admin (simple check - in production you'd have proper role-based access)
-  const isAdmin = user?.email?.includes('admin') || user?.subscriptionTier === 'admin';
+  // Check if user is admin (server-side verification will be the authoritative check)
+  const isAdmin = (user as any)?.role === 'admin';
 
   // Get analytics data for admin overview
   const { data: adminStats, isLoading: isLoadingStats } = useQuery({
