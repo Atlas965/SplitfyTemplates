@@ -1,14 +1,56 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import Logo from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+
+interface SubscriptionData {
+  hasSubscription: boolean;
+  subscriptionId?: string;
+  status?: string;
+  tier: string;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodStart?: number;
+  currentPeriodEnd?: number;
+  nextBillingDate?: number;
+}
 
 export default function Billing() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
+
+  // Fetch subscription data
+  const { data: subscriptionData, isLoading: subscriptionLoading } = useQuery<SubscriptionData>({
+    queryKey: ["/api/stripe/subscription"],
+    retry: false,
+    enabled: isAuthenticated,
+  });
+
+  // Cancel subscription mutation
+  const cancelSubscriptionMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/stripe/cancel-subscription", {});
+    },
+    onSuccess: () => {
+      toast({
+        title: "Subscription Cancelled",
+        description: "Your subscription will be cancelled at the end of the current billing period.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/stripe/subscription"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to cancel subscription. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -33,7 +75,7 @@ export default function Billing() {
     );
   }
 
-  const currentPlan = user?.subscriptionTier || "free";
+  const currentPlan = (user as any)?.subscriptionTier || "free";
   const currentPlanName = currentPlan === "free" ? "Free" : currentPlan === "pro" ? "Pro" : "Label";
   const currentPlanPrice = currentPlan === "free" ? "$0" : currentPlan === "pro" ? "$19" : "$49";
 
@@ -90,22 +132,60 @@ export default function Billing() {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-card p-6 rounded-xl border border-border">
               <h3 className="text-lg font-semibold mb-4">Current Plan</h3>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-2xl font-bold text-accent">{currentPlanName} Plan</p>
-                  <p className="text-muted-foreground">{currentPlanPrice}/month • Billed monthly</p>
+              {subscriptionLoading ? (
+                <div className="animate-pulse space-y-3">
+                  <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
                 </div>
-                <Button variant="outline" data-testid="button-change-plan">
-                  Change Plan
-                </Button>
-              </div>
-              {currentPlan !== "free" && (
-                <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-green-800 text-sm">
-                    <i className="fas fa-check-circle mr-2"></i>
-                    Your next billing date is {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
-                  </p>
-                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-2xl font-bold text-accent">
+                          {subscriptionData?.tier === 'pro' ? 'Pro' : 
+                           subscriptionData?.tier === 'label' ? 'Label' : 'Free'} Plan
+                        </p>
+                        {subscriptionData?.hasSubscription && (
+                          <Badge variant={subscriptionData.status === 'active' ? 'default' : 'secondary'}>
+                            {subscriptionData.status}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground">
+                        {subscriptionData?.tier === 'pro' ? '$19' : 
+                         subscriptionData?.tier === 'label' ? '$49' : '$0'}/month • Billed monthly
+                      </p>
+                    </div>
+                    <Button variant="outline" data-testid="button-change-plan">
+                      Change Plan
+                    </Button>
+                  </div>
+                  {subscriptionData?.hasSubscription && subscriptionData.nextBillingDate && (
+                    <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                      <p className="text-green-800 dark:text-green-200 text-sm">
+                        <i className="fas fa-check-circle mr-2"></i>
+                        {subscriptionData.cancelAtPeriodEnd ? 
+                          `Subscription ends on ${new Date(subscriptionData.nextBillingDate * 1000).toLocaleDateString()}` :
+                          `Your next billing date is ${new Date(subscriptionData.nextBillingDate * 1000).toLocaleDateString()}`
+                        }
+                      </p>
+                    </div>
+                  )}
+                  {subscriptionData?.hasSubscription && !subscriptionData.cancelAtPeriodEnd && (
+                    <div className="mt-4">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => cancelSubscriptionMutation.mutate()}
+                        disabled={cancelSubscriptionMutation.isPending}
+                        data-testid="button-cancel-subscription"
+                      >
+                        {cancelSubscriptionMutation.isPending ? 'Canceling...' : 'Cancel Subscription'}
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

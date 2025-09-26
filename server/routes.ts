@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import Stripe from "stripe";
 import { storage } from "./storage";
@@ -12,10 +13,18 @@ import { z } from "zod";
 
 // Initialize Stripe only if secret key is available
 let stripe: Stripe | null = null;
-if (process.env.STRIPE_SECRET_KEY) {
-  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: "2025-08-27.basil",
-  });
+const stripeKey = process.env.STRIPE_SECRET_KEY || process.env.TESTING_STRIPE_SECRET_KEY;
+
+if (stripeKey) {
+  // Validate that we have a secret key, not a public key
+  if (stripeKey.startsWith('sk_')) {
+    stripe = new Stripe(stripeKey, {
+      apiVersion: "2024-09-30.acacia",
+    });
+    console.log('Stripe initialized with secret key');
+  } else {
+    console.warn('Invalid Stripe key - key must start with sk_ for server-side usage. Stripe functionality disabled.');
+  }
 } else {
   console.warn('STRIPE_SECRET_KEY not found - Stripe functionality will be disabled');
 }
@@ -217,13 +226,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: `${user.firstName} ${user.lastName}`,
       });
 
+      // Determine price ID based on plan
+      const { plan = 'pro' } = req.body;
+      let priceId;
+      let tier;
+      
+      switch (plan) {
+        case 'pro':
+          priceId = process.env.STRIPE_PRO_PRICE_ID || 'price_pro_default';
+          tier = 'pro';
+          break;
+        case 'label':
+          priceId = process.env.STRIPE_LABEL_PRICE_ID || 'price_label_default';
+          tier = 'label';
+          break;
+        default:
+          priceId = process.env.STRIPE_PRO_PRICE_ID || 'price_pro_default';
+          tier = 'pro';
+      }
+
       const subscription = await stripe.subscriptions.create({
         customer: customer.id,
         items: [{
-          price: process.env.STRIPE_PRICE_ID || 'price_1234', // Default price ID
+          price: priceId,
         }],
         payment_behavior: 'default_incomplete',
         expand: ['latest_invoice.payment_intent'],
+        metadata: {
+          tier: tier,
+          userId: userId,
+        },
       });
 
       await storage.updateUserStripeInfo(userId, customer.id, subscription.id);
@@ -235,6 +267,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Stripe subscription error:", error);
       return res.status(400).json({ error: { message: error.message } });
+    }
+  });
+
+  // Stripe webhook handler
+  app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    if (!stripe) {
+      return res.status(503).json({ message: "Stripe is not configured" });
+    }
+
+    const sig = req.headers['stripe-signature'];
+    let event: any;
+
+    try {
+      // Verify webhook signature
+      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+      if (webhookSecret) {
+        event = stripe.webhooks.constructEvent(req.body, sig!, webhookSecret);
+      } else {
+        // For development - accept event without verification
+        event = req.body;
+        console.warn('Webhook signature verification skipped - STRIPE_WEBHOOK_SECRET not configured');
+      }
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err);
+      return res.status(400).send(`Webhook Error: ${err}`);
+    }
+
+    try {
+      // Handle the event
+      switch (event.type) {
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated':
+          const subscription = event.data.object;
+          console.log(`Subscription ${event.type}:`, subscription.id);
+          
+          // Update user subscription status in database
+          if (subscription.customer) {
+            const user = await storage.getUserByStripeCustomerId(subscription.customer);
+            if (user) {
+              const tier = subscription.metadata?.tier || 'pro';
+              const subscriptionStatus = subscription.status === 'active' ? tier : 'free';
+              
+              await storage.updateUser(user.id, {
+                subscriptionStatus: subscription.status,
+                subscriptionTier: subscriptionStatus,
+                stripeSubscriptionId: subscription.id,
+              });
+              
+              console.log(`Updated user ${user.id} subscription to ${tier} (${subscription.status})`);
+            } else {
+              console.warn(`User not found for Stripe customer: ${subscription.customer}`);
+            }
+          }
+          break;
+
+        case 'customer.subscription.deleted':
+          const deletedSubscription = event.data.object;
+          console.log('Subscription deleted:', deletedSubscription.id);
+          
+          // Update user to free tier
+          if (deletedSubscription.customer) {
+            const user = await storage.getUserByStripeCustomerId(deletedSubscription.customer);
+            if (user) {
+              await storage.updateUser(user.id, {
+                subscriptionStatus: 'cancelled',
+                subscriptionTier: 'free',
+                stripeSubscriptionId: null,
+              });
+              
+              console.log(`Updated user ${user.id} to free tier after subscription deletion`);
+            } else {
+              console.warn(`User not found for Stripe customer: ${deletedSubscription.customer}`);
+            }
+          }
+          break;
+
+        case 'invoice.payment_succeeded':
+          const invoice = event.data.object;
+          console.log('Payment succeeded for invoice:', invoice.id);
+          break;
+
+        case 'invoice.payment_failed':
+          const failedInvoice = event.data.object;
+          console.log('Payment failed for invoice:', failedInvoice.id);
+          break;
+
+        default:
+          console.log(`Unhandled event type ${event.type}`);
+      }
+
+      res.json({ received: true });
+    } catch (error) {
+      console.error('Error processing webhook:', error);
+      res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  });
+
+  // Cancel subscription endpoint
+  app.post('/api/stripe/cancel-subscription', isAuthenticated, async (req: any, res) => {
+    try {
+      if (!stripe) {
+        return res.status(503).json({ message: "Stripe is not configured. Please contact support." });
+      }
+
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || !user.stripeSubscriptionId) {
+        return res.status(400).json({ message: "No active subscription found" });
+      }
+
+      // Cancel the subscription at period end
+      const subscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
+        cancel_at_period_end: true,
+      });
+
+      res.json({
+        message: "Subscription cancelled successfully",
+        subscriptionId: subscription.id,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        currentPeriodEnd: subscription.current_period_end,
+      });
+    } catch (error: any) {
+      console.error("Subscription cancellation error:", error);
+      return res.status(400).json({ error: { message: error.message } });
+    }
+  });
+
+  // Get subscription details endpoint
+  app.get('/api/stripe/subscription', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // If no user or subscription, return free tier
+      if (!user || !user.stripeSubscriptionId) {
+        return res.json({
+          hasSubscription: false,
+          tier: user?.subscriptionTier || 'free',
+          status: 'inactive'
+        });
+      }
+
+      // If Stripe is properly configured, get live data
+      if (stripe) {
+        try {
+          const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+          
+          return res.json({
+            hasSubscription: subscription.status === 'active',
+            subscriptionId: subscription.id,
+            status: subscription.status,
+            tier: subscription.metadata?.tier || user.subscriptionTier || 'pro',
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            currentPeriodStart: subscription.current_period_start,
+            currentPeriodEnd: subscription.current_period_end,
+            nextBillingDate: subscription.current_period_end,
+          });
+        } catch (stripeError: any) {
+          console.error("Stripe API error:", stripeError);
+          // Fall back to database data if Stripe fails
+        }
+      }
+
+      // Fallback to database-stored subscription info when Stripe unavailable
+      return res.json({
+        hasSubscription: user.subscriptionTier !== 'free',
+        tier: user.subscriptionTier || 'free',
+        status: user.subscriptionStatus || 'active',
+        subscriptionId: user.stripeSubscriptionId,
+        // Mock dates for demo purposes when Stripe unavailable
+        currentPeriodStart: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60),
+        currentPeriodEnd: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60),
+        nextBillingDate: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60),
+      });
+    } catch (error: any) {
+      console.error("Subscription retrieval error:", error);
+      return res.status(500).json({ error: { message: error.message } });
     }
   });
 
