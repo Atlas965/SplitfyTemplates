@@ -32,6 +32,11 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  bio: text("bio"),
+  skills: text("skills").array(),
+  preferences: jsonb("preferences"),
+  contactInfo: jsonb("contact_info"),
+  isActive: boolean("is_active").default(true),
   stripeCustomerId: varchar("stripe_customer_id"),
   stripeSubscriptionId: varchar("stripe_subscription_id"),
   subscriptionStatus: varchar("subscription_status").default("free"),
@@ -89,6 +94,86 @@ export const contractSignatures = pgTable("contract_signatures", {
   ipAddress: varchar("ip_address"),
   userAgent: text("user_agent"),
   signedAt: timestamp("signed_at").defaultNow(),
+});
+
+// User activity tracking
+export const userActivity = pgTable("user_activity", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  activityType: varchar("activity_type").notNull(), // login, profile_view, negotiation_start, etc.
+  activityData: jsonb("activity_data"),
+  ipAddress: varchar("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Profile views tracking
+export const profileViews = pgTable("profile_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  viewerId: varchar("viewer_id").references(() => users.id),
+  profileId: varchar("profile_id").references(() => users.id).notNull(),
+  viewedAt: timestamp("viewed_at").defaultNow(),
+});
+
+// AI Negotiations
+export const negotiations = pgTable("negotiations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar("title").notNull(),
+  description: text("description"),
+  status: varchar("status").default("active"), // active, completed, cancelled
+  createdBy: varchar("created_by").references(() => users.id).notNull(),
+  participants: varchar("participants").array(),
+  aiAssistantEnabled: boolean("ai_assistant_enabled").default(true),
+  negotiationData: jsonb("negotiation_data"),
+  outcome: jsonb("outcome"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Negotiation conversations
+export const negotiationConversations = pgTable("negotiation_conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  negotiationId: varchar("negotiation_id").references(() => negotiations.id).notNull(),
+  senderId: varchar("sender_id").references(() => users.id).notNull(),
+  message: text("message").notNull(),
+  messageType: varchar("message_type").default("text"), // text, ai_suggestion, system
+  sentimentScore: decimal("sentiment_score", { precision: 3, scale: 2 }),
+  aiAnalysis: jsonb("ai_analysis"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// User matching/recommendations
+export const userMatches = pgTable("user_matches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  matchedUserId: varchar("matched_user_id").references(() => users.id).notNull(),
+  matchScore: decimal("match_score", { precision: 3, scale: 2 }),
+  matchReason: text("match_reason"),
+  status: varchar("status").default("suggested"), // suggested, connected, dismissed
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Messages between users
+export const messages = pgTable("messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  senderId: varchar("sender_id").references(() => users.id).notNull(),
+  receiverId: varchar("receiver_id").references(() => users.id).notNull(),
+  content: text("content").notNull(),
+  messageType: varchar("message_type").default("text"), // text, image, file
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// System notifications
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  title: varchar("title").notNull(),
+  content: text("content").notNull(),
+  type: varchar("type").notNull(), // info, warning, success, error
+  isRead: boolean("is_read").default(false),
+  actionUrl: varchar("action_url"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Relations
@@ -161,6 +246,42 @@ export const insertContractSignatureSchema = createInsertSchema(contractSignatur
   signedAt: true,
 });
 
+export const insertUserActivitySchema = createInsertSchema(userActivity).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertProfileViewSchema = createInsertSchema(profileViews).omit({
+  id: true,
+  viewedAt: true,
+});
+
+export const insertNegotiationSchema = createInsertSchema(negotiations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertNegotiationConversationSchema = createInsertSchema(negotiationConversations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertUserMatchSchema = createInsertSchema(userMatches).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type UpsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -172,3 +293,10 @@ export type ContractCollaborator = typeof contractCollaborators.$inferSelect;
 export type InsertContractCollaborator = z.infer<typeof insertContractCollaboratorSchema>;
 export type ContractSignature = typeof contractSignatures.$inferSelect;
 export type InsertContractSignature = z.infer<typeof insertContractSignatureSchema>;
+export type UserActivity = typeof userActivity.$inferSelect;
+export type ProfileView = typeof profileViews.$inferSelect;
+export type Negotiation = typeof negotiations.$inferSelect;
+export type NegotiationConversation = typeof negotiationConversations.$inferSelect;
+export type UserMatch = typeof userMatches.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
