@@ -7,6 +7,22 @@ import { isUnauthorizedError } from "@/lib/authUtils";
 import Logo from "@/components/Logo";
 import StatCard from "@/components/StatCard";
 
+interface DashboardStats {
+  totalContracts: number;
+  pendingSignatures: number;
+  completedThisMonth: number;
+  revenueSplit: number;
+}
+
+interface Contract {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
@@ -26,12 +42,12 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
     retry: false,
   });
 
-  const { data: contracts, isLoading: contractsLoading } = useQuery({
+  const { data: contracts, isLoading: contractsLoading } = useQuery<Contract[]>({
     queryKey: ["/api/contracts"],
     retry: false,
   });
@@ -115,7 +131,7 @@ export default function Dashboard() {
           />
           <StatCard
             title="Revenue Split"
-            value={statsLoading ? "..." : `$${stats?.revenueSpilt || 0}`}
+            value={statsLoading ? "..." : `$${stats?.revenueSplit || 0}`}
             icon="fas fa-dollar-sign"
             iconBg="bg-green-100"
             iconColor="text-green-600"
@@ -134,7 +150,7 @@ export default function Dashboard() {
                   <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
                 </div>
               ) : contracts && contracts.length > 0 ? (
-                contracts.slice(0, 3).map((contract: any) => (
+                contracts.slice(0, 3).map((contract) => (
                   <div key={contract.id} className="flex items-center space-x-4 p-4 bg-muted rounded-lg">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                       contract.status === 'signed' ? 'bg-green-100' : 

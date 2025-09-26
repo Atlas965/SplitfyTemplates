@@ -244,14 +244,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const contracts = await storage.getContracts(userId);
       
+      const now = new Date();
       const stats = {
         totalContracts: contracts.length,
         pendingSignatures: contracts.filter(c => c.status === 'pending').length,
-        completedThisMonth: contracts.filter(c => 
-          c.status === 'signed' && 
-          new Date(c.updatedAt!).getMonth() === new Date().getMonth()
-        ).length,
-        revenueSpilt: 0, // This would need more complex calculation
+        completedThisMonth: contracts.filter(c => {
+          if (c.status !== 'signed' || !c.updatedAt) return false;
+          const updatedDate = new Date(c.updatedAt);
+          return updatedDate.getMonth() === now.getMonth() && 
+                 updatedDate.getFullYear() === now.getFullYear();
+        }).length,
+        revenueSplit: contracts.filter(c => c.status === 'signed').length * 100, // Simplified: $100 per signed contract
       };
       
       res.json(stats);
