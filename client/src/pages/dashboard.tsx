@@ -102,6 +102,15 @@ export default function Dashboard() {
               <Link href="/negotiations" className="nav-item" data-testid="tab-negotiations">
                 <i className="fas fa-handshake mr-2"></i>Negotiations
               </Link>
+              <Link href="/matches" className="nav-item" data-testid="tab-matches">
+                <i className="fas fa-users mr-2"></i>Connections
+              </Link>
+              <Link href="/messages" className="nav-item" data-testid="tab-messages">
+                <i className="fas fa-envelope mr-2"></i>Messages
+              </Link>
+              <Link href="/search" className="nav-item" data-testid="tab-search">
+                <i className="fas fa-search mr-2"></i>Search
+              </Link>
               <Link href="/templates" className="nav-item" data-testid="tab-templates">
                 <i className="fas fa-layer-group mr-2"></i>Templates
               </Link>

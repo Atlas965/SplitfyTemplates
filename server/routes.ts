@@ -22,6 +22,7 @@ import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import OpenAI from "openai";
+import { insertUserMatchSchema, insertMessageSchema, insertNotificationSchema } from "@shared/schema";
 
 // Rate limiting storage (in production, use Redis or database)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
@@ -48,6 +49,25 @@ function rateLimit(maxRequests: number, windowMs: number) {
     current.count++;
     next();
   };
+}
+
+// Admin authorization middleware
+function isAdmin(req: any, res: any, next: any) {
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  
+  // Check if user has admin privileges (check subscription tier or email)
+  const isAdminUser = user.claims?.email?.includes('admin') || 
+                     user.claims?.subscriptionTier === 'admin' ||
+                     user.claims?.role === 'admin';
+                     
+  if (!isAdminUser) {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+  
+  next();
 }
 
 // Initialize Stripe only if secret key is available
@@ -1021,6 +1041,253 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+  // ===== USER MATCHING ROUTES =====
+  
+  // Get user recommendations
+  app.get('/api/matches/recommendations', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const limit = parseInt(req.query.limit) || 10;
+      
+      const recommendations = await storage.getUserRecommendations(userId, limit);
+      res.json(recommendations);
+    } catch (error) {
+      console.error("Error getting recommendations:", error);
+      res.status(500).json({ message: "Failed to get recommendations" });
+    }
+  });
+
+  // Get user matches
+  app.get('/api/matches', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const status = req.query.status;
+      
+      const matches = await storage.getUserMatches(userId, status);
+      res.json(matches);
+    } catch (error) {
+      console.error("Error getting matches:", error);
+      res.status(500).json({ message: "Failed to get matches" });
+    }
+  });
+
+  // Connect with a user (create match)
+  app.post('/api/matches', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      
+      // Validate request body using Zod schema
+      const matchData = insertUserMatchSchema.parse({
+        ...req.body,
+        userId
+      });
+      
+      const { matchedUserId, matchScore, matchReason } = matchData;
+      
+      const match = await storage.createUserMatch(
+        userId, 
+        matchedUserId, 
+        Number(matchScore) || 0.8, 
+        matchReason || "Manual connection"
+      );
+      
+      // Create notification for the matched user
+      await storage.createNotification(
+        matchedUserId,
+        "New Connection Request",
+        `You have a new connection request!`,
+        "info",
+        `/matches`
+      );
+      
+      res.status(201).json(match);
+    } catch (error) {
+      console.error("Error creating match:", error);
+      res.status(500).json({ message: "Failed to create match" });
+    }
+  });
+
+  // Update match status
+  app.patch('/api/matches/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const matchId = req.params.id;
+      const { status } = req.body;
+      
+      if (!status) {
+        return res.status(400).json({ message: "Status is required" });
+      }
+      
+      await storage.updateMatchStatus(matchId, status);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating match status:", error);
+      res.status(500).json({ message: "Failed to update match status" });
+    }
+  });
+
+  // ===== MESSAGING ROUTES =====
+  
+  // Get user conversations
+  app.get('/api/conversations', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const conversations = await storage.getUserConversations(userId);
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error getting conversations:", error);
+      res.status(500).json({ message: "Failed to get conversations" });
+    }
+  });
+
+  // Get conversation with specific user
+  app.get('/api/conversations/:userId', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user.claims.sub;
+      const otherUserId = req.params.userId;
+      const limit = parseInt(req.query.limit) || 50;
+      
+      const messages = await storage.getConversation(currentUserId, otherUserId, limit);
+      res.json(messages.reverse()); // Return in chronological order
+    } catch (error) {
+      console.error("Error getting conversation:", error);
+      res.status(500).json({ message: "Failed to get conversation" });
+    }
+  });
+
+  // Send message
+  app.post('/api/messages', isAuthenticated, rateLimit(30, 60000), async (req: any, res) => {
+    try {
+      const senderId = req.user.claims.sub;
+      
+      // Validate request body using Zod schema
+      const messageData = insertMessageSchema.parse({
+        ...req.body,
+        senderId
+      });
+      
+      const { receiverId, content, messageType } = messageData;
+      
+      const message = await storage.sendMessage(senderId, receiverId, content, messageType || 'text');
+      
+      // Create notification for receiver
+      const sender = await storage.getUser(senderId);
+      await storage.createNotification(
+        receiverId,
+        "New Message",
+        `${sender?.firstName || 'Someone'} sent you a message`,
+        "info",
+        `/messages/${senderId}`
+      );
+      
+      res.status(201).json(message);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  // Mark messages as read
+  app.patch('/api/conversations/:userId/read', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user.claims.sub;
+      const senderId = req.params.userId;
+      
+      await storage.markMessagesAsRead(currentUserId, senderId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking messages as read:", error);
+      res.status(500).json({ message: "Failed to mark messages as read" });
+    }
+  });
+
+  // ===== NOTIFICATION ROUTES =====
+  
+  // Get user notifications
+  app.get('/api/notifications', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const unreadOnly = req.query.unread === 'true';
+      
+      const notifications = await storage.getUserNotifications(userId, unreadOnly);
+      res.json(notifications);
+    } catch (error) {
+      console.error("Error getting notifications:", error);
+      res.status(500).json({ message: "Failed to get notifications" });
+    }
+  });
+
+  // Mark notification as read
+  app.patch('/api/notifications/:id/read', isAuthenticated, async (req: any, res) => {
+    try {
+      const notificationId = req.params.id;
+      await storage.markNotificationAsRead(notificationId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      res.status(500).json({ message: "Failed to mark notification as read" });
+    }
+  });
+
+  // Mark all notifications as read
+  app.patch('/api/notifications/read-all', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      await storage.markAllNotificationsAsRead(userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      res.status(500).json({ message: "Failed to mark all notifications as read" });
+    }
+  });
+
+  // ===== ADMIN ROUTES =====
+  
+  // Get all users (admin only)
+  app.get('/api/admin/users', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const search = req.query.search || '';
+      
+      // Get users with pagination and search
+      const users = await storage.getAllUsers(page, limit, search);
+      res.json(users);
+    } catch (error) {
+      console.error("Error getting users:", error);
+      res.status(500).json({ message: "Failed to get users" });
+    }
+  });
+
+  // Update user status (admin only)
+  app.patch('/api/admin/users/:id', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const userId = req.params.id;
+      const { isActive, subscriptionTier } = req.body;
+      
+      const updatedUser = await storage.updateUser(userId, { 
+        isActive,
+        subscriptionTier,
+        updatedAt: new Date()
+      });
+      
+      res.json(updatedUser);
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  // Get system activity (admin only)
+  app.get('/api/admin/activity', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const activity = await storage.getRecentActivity(50);
+      res.json(activity);
+    } catch (error) {
+      console.error("Error getting activity:", error);
+      res.status(500).json({ message: "Failed to get activity" });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;

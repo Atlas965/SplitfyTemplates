@@ -16,6 +16,10 @@ import Billing from "@/pages/billing";
 import ContractForm from "@/pages/contract-form";
 import Negotiations from "@/pages/negotiations";
 import NegotiationDetail from "@/pages/negotiation-detail";
+import Matches from "@/pages/matches";
+import Messages from "@/pages/messages";
+import Admin from "@/pages/admin";
+import Search from "@/pages/search";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -37,6 +41,11 @@ function Router() {
           <Route path="/billing" component={Billing} />
           <Route path="/negotiations" component={Negotiations} />
           <Route path="/negotiations/:id" component={NegotiationDetail} />
+          <Route path="/matches" component={Matches} />
+          <Route path="/messages" component={Messages} />
+          <Route path="/messages/:userId" component={Messages} />
+          <Route path="/search" component={Search} />
+          <Route path="/admin" component={Admin} />
           <Route path="/contract/:type" component={ContractForm} />
         </>
       )}
