@@ -300,3 +300,16 @@ export type NegotiationConversation = typeof negotiationConversations.$inferSele
 export type UserMatch = typeof userMatches.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+
+// Activity tracking schemas
+export const activityEventSchema = z.object({
+  activityType: z.string().min(1).max(50),
+  activityData: z.any().optional(),
+});
+
+export const batchActivitiesSchema = z.object({
+  activities: z.array(activityEventSchema).min(1).max(100), // Limit batch size
+});
+
+export type ActivityEvent = z.infer<typeof activityEventSchema>;
+export type BatchActivities = z.infer<typeof batchActivitiesSchema>;

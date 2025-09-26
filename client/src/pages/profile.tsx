@@ -1,4 +1,5 @@
 import { useState } from "react";
+import React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { User, insertUserSchema } from "@shared/schema";
 import { Camera, User as UserIcon, Mail, Phone, MapPin, Globe, Plus, X } from "lucide-react";
+import { activityTracker } from "@/lib/activityTracker";
 
 const profileSchema = insertUserSchema.extend({
   skills: z.array(z.string()).default([]),
@@ -32,6 +34,11 @@ type ProfileFormData = z.infer<typeof profileSchema>;
 export default function ProfilePage() {
   const { toast } = useToast();
   const [newSkill, setNewSkill] = useState("");
+
+  // Track page view
+  React.useEffect(() => {
+    activityTracker.trackPageView('profile');
+  }, []);
 
   const { data: user, isLoading } = useQuery<User>({
     queryKey: ["/api/auth/user"],
@@ -61,6 +68,7 @@ export default function ProfilePage() {
     mutationFn: (data: ProfileFormData) => 
       apiRequest("/api/profile", "PATCH", data),
     onSuccess: () => {
+      activityTracker.trackProfileAction('profile_updated', { fieldsUpdated: Object.keys(form.getValues()) });
       toast({
         title: "Profile Updated",
         description: "Your profile has been successfully updated.",
@@ -68,6 +76,7 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     },
     onError: () => {
+      activityTracker.trackError('profile_update_failed', 'profile_form');
       toast({
         title: "Error",
         description: "Failed to update profile. Please try again.",

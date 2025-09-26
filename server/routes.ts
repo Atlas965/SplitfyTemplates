@@ -8,7 +8,11 @@ import {
   insertContractSchema, 
   insertContractCollaboratorSchema,
   insertContractSignatureSchema,
-  insertUserSchema
+  insertUserSchema,
+  activityEventSchema,
+  batchActivitiesSchema,
+  type ActivityEvent,
+  type BatchActivities
 } from "@shared/schema";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
@@ -659,6 +663,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
       res.status(500).json({ message: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  // Analytics data route - user-specific analytics by default
+  app.get('/api/analytics', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      
+      // Don't track page view here to avoid double counting (client-side tracks it)
+      
+      // Get user-specific analytics (scoped to user's own data)
+      const analyticsData = await storage.getAnalyticsData(userId);
+      res.json(analyticsData);
+    } catch (error) {
+      console.error("Error fetching analytics data:", error);
+      res.status(500).json({ message: "Failed to fetch analytics data" });
+    }
+  });
+
+  // Global analytics route - admin only
+  app.get('/api/analytics/global', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Check if user is admin (you can adjust this logic based on your admin system)
+      if (!user || user.subscriptionTier !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      // Track admin analytics access
+      await storage.trackUserActivity(userId, 'admin_analytics_access');
+      
+      // Get global platform analytics
+      const analyticsData = await storage.getAnalyticsData(); // No userId = global analytics
+      res.json(analyticsData);
+    } catch (error) {
+      console.error("Error fetching global analytics data:", error);
+      res.status(500).json({ message: "Failed to fetch global analytics data" });
+    }
+  });
+
+  // Activity tracking endpoint
+  app.post('/api/activity', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const activityEvent = activityEventSchema.parse(req.body);
+      
+      await storage.trackUserActivity(userId, activityEvent.activityType, activityEvent.activityData);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error tracking activity:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid activity data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to track activity" });
+    }
+  });
+
+  // Batch activity tracking endpoint
+  app.post('/api/activity/batch', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const batchData = batchActivitiesSchema.parse(req.body);
+      
+      // Use bulk insert for true batching
+      await storage.trackUserActivitiesBulk(userId, batchData.activities);
+      
+      res.json({ success: true, processed: batchData.activities.length });
+    } catch (error) {
+      console.error("Error tracking batch activities:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid batch data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to track batch activities" });
     }
   });
 

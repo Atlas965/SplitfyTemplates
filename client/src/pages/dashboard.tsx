@@ -93,6 +93,12 @@ export default function Dashboard() {
               <Link href="/contracts" className="nav-item" data-testid="tab-contracts">
                 <i className="fas fa-file-contract mr-2"></i>Contracts
               </Link>
+              <Link href="/profile" className="nav-item" data-testid="tab-profile">
+                <i className="fas fa-user mr-2"></i>Profile
+              </Link>
+              <Link href="/analytics" className="nav-item" data-testid="tab-analytics">
+                <i className="fas fa-chart-bar mr-2"></i>Analytics
+              </Link>
               <Link href="/templates" className="nav-item" data-testid="tab-templates">
                 <i className="fas fa-layer-group mr-2"></i>Templates
               </Link>
