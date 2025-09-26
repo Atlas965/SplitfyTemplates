@@ -47,11 +47,19 @@ export default function ProfilePage() {
       skills: user?.skills || [],
       contactInfo: user?.contactInfo || { phone: "", location: "", website: "" },
     },
+    values: {
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      email: user?.email || "",
+      bio: user?.bio || "",
+      skills: user?.skills || [],
+      contactInfo: user?.contactInfo || { phone: "", location: "", website: "" },
+    },
   });
 
   const updateProfileMutation = useMutation({
     mutationFn: (data: ProfileFormData) => 
-      apiRequest("/api/profile", { method: "PATCH", body: JSON.stringify(data) }),
+      apiRequest("/api/profile", "PATCH", data),
     onSuccess: () => {
       toast({
         title: "Profile Updated",
@@ -70,10 +78,7 @@ export default function ProfilePage() {
 
   const uploadProfileImageMutation = useMutation({
     mutationFn: (imageUrl: string) =>
-      apiRequest("/api/profile/image", { 
-        method: "PUT", 
-        body: JSON.stringify({ profileImageUrl: imageUrl }) 
-      }),
+      apiRequest("/api/profile/image", "PUT", { profileImageUrl: imageUrl }),
     onSuccess: () => {
       toast({
         title: "Profile Image Updated",
@@ -91,7 +96,7 @@ export default function ProfilePage() {
   });
 
   const handleGetUploadParameters = async () => {
-    const response = await apiRequest("/api/objects/upload", { method: "POST" });
+    const response = await apiRequest("/api/objects/upload", "POST");
     const data = await response.json();
     return {
       method: "PUT" as const,
@@ -201,7 +206,7 @@ export default function ProfilePage() {
                       <FormItem>
                         <FormLabel>First Name</FormLabel>
                         <FormControl>
-                          <Input {...field} data-testid="input-first-name" />
+                          <Input {...field} value={field.value || ""} data-testid="input-first-name" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -215,7 +220,7 @@ export default function ProfilePage() {
                       <FormItem>
                         <FormLabel>Last Name</FormLabel>
                         <FormControl>
-                          <Input {...field} data-testid="input-last-name" />
+                          <Input {...field} value={field.value || ""} data-testid="input-last-name" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -230,7 +235,7 @@ export default function ProfilePage() {
                     <FormItem>
                       <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input {...field} type="email" disabled data-testid="input-email" />
+                        <Input {...field} value={field.value || ""} type="email" disabled data-testid="input-email" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -246,6 +251,7 @@ export default function ProfilePage() {
                       <FormControl>
                         <Textarea 
                           {...field} 
+                          value={field.value || ""}
                           placeholder="Tell us about yourself..."
                           className="min-h-[100px]"
                           data-testid="textarea-bio"

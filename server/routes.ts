@@ -7,9 +7,12 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
   insertContractSchema, 
   insertContractCollaboratorSchema,
-  insertContractSignatureSchema 
+  insertContractSignatureSchema,
+  insertUserSchema
 } from "@shared/schema";
 import { z } from "zod";
+import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { ObjectPermission } from "./objectAcl";
 
 // Initialize Stripe only if secret key is available
 let stripe: Stripe | null = null;
@@ -19,7 +22,7 @@ if (stripeKey) {
   // Validate that we have a secret key, not a public key
   if (stripeKey.startsWith('sk_')) {
     stripe = new Stripe(stripeKey, {
-      apiVersion: "2024-09-30.acacia",
+      apiVersion: "2025-08-27.basil",
     });
     console.log('Stripe initialized with secret key');
   } else {
@@ -286,6 +289,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.status(500).json({ message: "Failed to create signature" });
     }
+  });
+
+  // Profile management routes
+  app.get('/api/profile', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  app.patch('/api/profile', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const updateData = insertUserSchema.partial().parse(req.body);
+      const updatedUser = await storage.updateUser(userId, updateData);
+      res.json(updatedUser);
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid profile data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.put('/api/profile/image', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { profileImageUrl } = req.body;
+      
+      if (!profileImageUrl) {
+        return res.status(400).json({ message: "Profile image URL is required" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        profileImageUrl,
+        {
+          owner: userId,
+          visibility: "public", // Profile images are public
+        }
+      );
+
+      const updatedUser = await storage.updateUser(userId, {
+        profileImageUrl: normalizedPath
+      });
+      
+      res.json({ profileImageUrl: normalizedPath });
+    } catch (error) {
+      console.error("Error updating profile image:", error);
+      res.status(500).json({ message: "Failed to update profile image" });
+    }
+  });
+
+  // Object Storage routes
+  app.get('/objects/:objectPath(*)', isAuthenticated, async (req: any, res) => {
+    const userId = req.user?.claims?.sub;
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const objectFile = await objectStorageService.getObjectEntityFile(
+        req.path,
+      );
+      const canAccess = await objectStorageService.canAccessObjectEntity({
+        objectFile,
+        userId: userId,
+        requestedPermission: ObjectPermission.READ,
+      });
+      if (!canAccess) {
+        return res.sendStatus(401);
+      }
+      objectStorageService.downloadObject(objectFile, res);
+    } catch (error) {
+      console.error("Error checking object access:", error);
+      if (error instanceof ObjectNotFoundError) {
+        return res.sendStatus(404);
+      }
+      return res.sendStatus(500);
+    }
+  });
+
+  app.post('/api/objects/upload', isAuthenticated, async (req, res) => {
+    const objectStorageService = new ObjectStorageService();
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    res.json({ uploadURL });
   });
 
   // Stripe subscription routes
