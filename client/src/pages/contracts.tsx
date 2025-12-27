@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog";
 import { downloadContractPDF } from "@/lib/pdfGenerator";
 
 export default function Contracts() {
@@ -18,6 +19,8 @@ export default function Contracts() {
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [contractToDelete, setContractToDelete] = useState<string | null>(null);
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -50,14 +53,16 @@ export default function Contracts() {
 
   const deleteContractMutation = useMutation({
     mutationFn: async (contractId: string) => {
-      return await apiRequest("DELETE", `/api/contracts/${contractId}`, {});
+      return await apiRequest("/api/contracts/" + contractId, "DELETE");
     },
     onSuccess: () => {
       toast({
         title: "Contract Deleted",
-        description: "The contract has been deleted successfully.",
+        description: "The contract has been permanently removed.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/contracts"] });
+      setDeleteDialogOpen(false);
+      setContractToDelete(null);
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -78,6 +83,17 @@ export default function Contracts() {
       });
     },
   });
+
+  const handleDeleteClick = (contractId: string) => {
+    setContractToDelete(contractId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (contractToDelete) {
+      deleteContractMutation.mutate(contractToDelete);
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -285,11 +301,7 @@ export default function Contracts() {
                           </button>
                           <button 
                             className="text-muted-foreground hover:text-red-600" 
-                            onClick={() => {
-                              if (window.confirm('Are you sure you want to delete this contract? This action cannot be undone.')) {
-                                deleteContractMutation.mutate(contract.id);
-                              }
-                            }}
+                            onClick={() => handleDeleteClick(contract.id)}
                             disabled={deleteContractMutation.isPending}
                             data-testid={`button-delete-${contract.id}`}
                           >
@@ -320,6 +332,34 @@ export default function Contracts() {
             )}
           </div>
         </div>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent data-testid="delete-contract-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Contract</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Are you sure you want to delete this contract? This action is permanent and cannot be undone.
+              </p>
+              <p className="text-xs text-red-600 font-semibold">
+                All contract data, collaborations, and associated information will be permanently removed.
+              </p>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+              <Button
+                variant="destructive"
+                onClick={handleConfirmDelete}
+                disabled={deleteContractMutation.isPending}
+                data-testid="button-confirm-delete"
+              >
+                {deleteContractMutation.isPending ? "Deleting..." : "Delete Contract"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

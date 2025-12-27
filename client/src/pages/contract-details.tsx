@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -33,6 +34,7 @@ export default function ContractDetails() {
   const [, setLocation] = useLocation();
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -81,6 +83,38 @@ export default function ContractDetails() {
       toast({
         title: "Error",
         description: "Failed to update contract status. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteContractMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("/api/contracts/" + id, "DELETE");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Contract Deleted",
+        description: "The contract has been permanently removed.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/contracts"] });
+      setLocation("/contracts");
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to delete contract. Please try again.",
         variant: "destructive",
       });
     },
@@ -496,8 +530,46 @@ export default function ContractDetails() {
                 <SelectItem value="signed">Signed</SelectItem>
               </SelectContent>
             </Select>
+
+            <Button 
+              variant="destructive" 
+              onClick={() => setDeleteDialogOpen(true)}
+              disabled={deleteContractMutation.isPending}
+              data-testid="button-delete-contract"
+            >
+              <i className="fas fa-trash mr-2"></i>
+              Delete Contract
+            </Button>
           </div>
         </div>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent data-testid="delete-contract-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Contract</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Are you sure you want to delete <span className="font-semibold">"{contract?.title}"</span>? This action is permanent and cannot be undone.
+              </p>
+              <p className="text-xs text-red-600 font-semibold">
+                All contract data, collaborations, and associated information will be permanently removed.
+              </p>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+              <Button
+                variant="destructive"
+                onClick={() => deleteContractMutation.mutate()}
+                disabled={deleteContractMutation.isPending}
+                data-testid="button-confirm-delete"
+              >
+                {deleteContractMutation.isPending ? "Deleting..." : "Delete Contract"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Contract Content */}
         <div className="space-y-6">
