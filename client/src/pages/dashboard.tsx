@@ -57,7 +57,7 @@ export default function Dashboard() {
   });
 
   const deleteContractMutation = useMutation({
-    mutationFn: (contractId: string) => apiRequest("/api/contracts/" + contractId, "DELETE"),
+    mutationFn: (contractId: string) => apiRequest("DELETE", `/api/contracts/${contractId}`, {}),
     onSuccess: () => {
       toast({
         title: "Contract deleted",

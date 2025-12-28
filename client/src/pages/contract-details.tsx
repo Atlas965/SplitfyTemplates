@@ -90,7 +90,7 @@ export default function ContractDetails() {
 
   const deleteContractMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest("/api/contracts/" + id, "DELETE");
+      return await apiRequest("DELETE", `/api/contracts/${id}`, {});
     },
     onSuccess: () => {
       toast({
