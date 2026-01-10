@@ -1115,7 +1115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const match = await storage.createUserMatch(
         userId, 
         matchedUserId, 
-        matchScore, 
+        matchScore as any, 
         matchReason || "Manual connection"
       );
       
